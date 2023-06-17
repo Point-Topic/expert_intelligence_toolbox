@@ -18,6 +18,8 @@ A package needs:
 
 # How to get the package ready.
 
+**For Unix/MacOS**: see this https://packaging.python.org/en/latest/tutorials/packaging-projects/
+
 1 - Make a 'wheel' and source distribution file (you pack the source code as binary and tar file)
 `py -m pip install --upgrade build`
 `py -m build`
@@ -31,6 +33,13 @@ A package needs:
 `py -m twine upload --repository testpypi dist/*`
 Username: __token__
 PW: enter your token here (WARNING - CTRL-V WILL NOT WORK. IN VSCODE: Edit --> Paste)
+**Note**: 
+- Be carefull to check whether you're using the `pypi` or `test.pypi` to access the package.
+This tutorial is for `test.pypi`, so if you're using `pypi`, please change from `--repository testpypi` into `--repository pypi`
+- If you can't not get to the package using `API key`, using (not recommend, may cause leak private information)
+```bash
+twine upload -u YOUR-USERNAME -p YOUR-PASSWORD --repository testpypi dist/*
+```
 
 5 - you can pull your own package from 
 py -m pip install --index-url https://test.pypi.org/simple/ --no-deps expert_intelligence_toolbox
