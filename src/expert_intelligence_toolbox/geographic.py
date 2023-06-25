@@ -1,9 +1,14 @@
 from OSMPythonTools.overpass import Overpass, overpassQueryBuilder
-import pandas as pd
+from geopy.geocoders import Nominatim
+from shapely.geometry import Point
 import geolib.geohash
 import geopandas as gpd
+import pandas as pd
+import time
+import csv
 
-def convert_text_to_boundary(country: str, location: str, return_geometry: bool = True):
+
+def convert_string_to_boundary(country: str, location: str, return_geometry: bool = True):
     '''
     This function takes in a country and a city name, and returns the boundary of the city (or the raw boundary coordinates).
 
@@ -16,14 +21,16 @@ def convert_text_to_boundary(country: str, location: str, return_geometry: bool 
     Variables:
     country: Country name
     location: Location name
-    return_geometry: If True, returns a geopandas dataframe with polygon(s) of locations. If false, returns coordinates of the boundary.
+    return_geometry (default = True): 
+        If True, returns a geopandas dataframe with polygon(s) of locations. 
+        If false, returns coordinates of the boundary.
+        
     '''
     overpass = Overpass()
 
     query = f'''
     area[name="{country}"];
     (
-    //try and get the specfic London relation
     relation["type"="boundary"]["name"="{location}"](area);
     );
     (._;>;);
@@ -57,12 +64,12 @@ def convert_text_to_boundary(country: str, location: str, return_geometry: bool 
         return coordinates_df
     
 
-def text_to_uk_geog(location: str, lsoa_boundary_files_path: str, lsoa_msoa_la_lookup_path: str, output_geog: str = 'overview'):
+def convert_string_to_uk_geog(location: str, lsoa_boundary_files_path: str, lsoa_msoa_la_lookup_path: str, output_geog: str = 'overview'):
     '''
     This function converts a location to a list of LSOAs, MSOAs, or LAs.
     This current version only works for England and Wales (LSOAs), and not Scotland or Northern Ireland.
 
-    It is an extended verison of the function convert_text_to_boundary and comes with the same caveats.
+    It is an extended verison of the function convert_string_to_boundary and comes with the same caveats.
 
     However, it will then peform a spatial join between the polygon matching the location input and the LSOA boundary files 
     to find all LSOAs that are within the boundary of the location.
@@ -77,7 +84,7 @@ def text_to_uk_geog(location: str, lsoa_boundary_files_path: str, lsoa_msoa_la_l
     location: Location name, e.g. 'London'
     lsoa_boundary_files_path: Path to the LSOA boundary files
     lsoa_msoa_la_lookup_path: Path to the lookup table
-    output_geog: The output geography. Options are:
+    output_geog (default = 'overview'): The output geography. Options are:
         'lsoa': returns LSOA code and name 
         'msoa': returns MSOA code and name
         'la': returns LA code and name
@@ -90,7 +97,6 @@ def text_to_uk_geog(location: str, lsoa_boundary_files_path: str, lsoa_msoa_la_l
     query = f'''
     area[name="United Kingdom"];
     (
-    //try and get the specfic London relation
     relation["type"="boundary"]["name"="{location}"](area);
     );
     (._;>;);
@@ -164,3 +170,124 @@ def text_to_uk_geog(location: str, lsoa_boundary_files_path: str, lsoa_msoa_la_l
         output_df = pd.DataFrame({'LSOA21CD': unique_lsoa_codes, 'MSOA21CD': unique_msoa_codes, 'LAD22CD': unique_la_codes})
     elif output_geog == 'raw':
         return join_result
+    
+
+
+def convert_string_to_coordinates(path_to_input_csv:str, path_to_output_csv:str, append_str_to_input: str = ''):
+    '''
+    Converts a string to point location by finding closest OSM address, using Nominatim service of OSM. 
+    Returns output geographies(lat/long, wkt) and returns an exact address if one was matched on OSM.
+
+    Will (try to) handle any input, just like Google Maps will try finding anything you type into its search bar.
+    
+    Input CSV must be in this format (one column, LOCATIONS as header, any row containing a comma wrapped in " "):
+    LOCATIONS
+    London
+    Southampton
+    "North Hill, London"
+
+    Variables:
+    path_to_input_csv: path to input file in CSV format. Use format above. 
+    path_to_output_csv: path to output file in CSV format. Will create file if not exists. 
+    append_str_to_input (Default = ''): set to ',United Kingdom' you want to check 
+    'London, United Kingdom'; 'Southampton, United Kingdom' for all inputs.
+    '''
+
+    # Validate input path
+    if path_to_input_csv.split(".")[-1] not in ["csv"]:
+        raise Exception("The path must be in .csv or format.")
+    
+    # Communicates with OpenStreetMap Nomatim service
+    geolocator = Nominatim(user_agent="test1")
+    #Read in the address file
+    locations = pd.read_csv(path_to_input_csv)
+
+    for i in range(len(locations)):
+        
+        location = locations.iloc[i].to_string(index=False)
+        location = f'{location}, {append_str_to_input}'
+
+        try:
+            location = geolocator.geocode(location)
+
+            wkt = Point(location.longitude, location.latitude)
+            
+            output_addresses = pd.DataFrame(
+                {
+                    'location_name': [locations.iloc[i].to_string(index=False)],
+                    'long': [location.latitude],
+                    'lat': [location.latitude],
+                    'wkt': [wkt],
+                    'address_exact': [location.address]
+                }
+            )
+        except Exception as e:
+            output_addresses = pd.DataFrame({
+                    'location_name': [locations.iloc[i].to_string(index=False)],
+                    'long': '',
+                    'lat': '',
+                    'wkt': '',
+                    'address_exact': str(e)
+            })
+        
+        print(output_addresses) if i == 0 else print(output_addresses.values)
+        
+        # Save addresses to output file
+        output_addresses.to_csv(path_to_output_csv, 
+                                mode='w+' if i == 0 else 'a', 
+                                header=True if i == 0 else False, index=False)    
+        time.sleep(1) # to make sure nominatim doesnt block due to too many requests
+
+    print('Program has finished running')
+
+
+def convert_coordinates_to_address(path_to_input_csv: str, path_to_output_csv: str):
+    '''
+    Converts lat/long coordinates to address using Nominatim service of OSM.
+
+    Inputs must be a CSV with the following format:
+    location,lat,long
+    Place A,40.712776,-74.005974
+    Place B,51.5074,-0.1278
+    Place C,48.8566,2.3522
+
+    Variables:
+    path_to_input_csv: path to input file in CSV format. Use format above.
+    path_to_output_csv: path to output file in CSV format. Will create file if not exists.
+    '''
+
+    if path_to_input_csv.split(".")[-1] not in ["csv"]:
+        raise Exception("The path must be in .csv or format.")
+    
+    # Create Nominatim geocoder instance
+    geolocator = Nominatim(user_agent="coordinate_converter")
+
+    # Open input and output files
+    with open(path_to_input_csv, 'r') as input_csv, open(path_to_output_csv, 'w', newline='') as output_csv:
+        reader = csv.DictReader(input_csv)
+        fieldnames = ['location', 'lat', 'long', 'output_address']
+        writer = csv.DictWriter(output_csv, fieldnames=fieldnames)
+        writer.writeheader()
+
+        # Process each row in the input CSV
+        for row in reader:
+            location = row['location']
+            lat = row['lat']
+            lon = row['long']
+
+            # Convert coordinates to address
+            coordinates = f"{lat}, {lon}"
+            try:
+                address = geolocator.reverse(coordinates)
+            except Exception as e:
+                address = str(e)
+
+            # Write the result to the output CSV
+            writer.writerow({
+                'location': location,
+                'lat': lat,
+                'long': lon,
+                'output_address': str(address)
+            })
+
+    print("Conversion complete.")
