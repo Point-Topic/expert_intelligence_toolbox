@@ -1,88 +1,81 @@
 """
 This file contains method to interact with Snowflake using Snowpark
 """
-from snowflake.snowpark.session import Session
-from snowflake.snowpark.functions import col
 import configparser
 from snowflake.sqlalchemy import URL
 from sqlalchemy import create_engine
+import pandas as pd
 
-def load_table(sf_cre_path: str, columns: list, table: str):
+def sf_query_to_df(sf_cre_path: str, sf_query: str):
     """
-    Load columns in table and return a pandas dataframe.
+    Load a table from Snowflake into a Pandas DataFrame.
 
-    :param sf_cre_path: path to Snowflake credentials config file
-    :param columns: list of columns need to be fetched
-    :param table: name of table in Snowflake
+    :param sf_cre_path: Path to Snowflake credentials file.
+    :param sf_table_name: Name of the table to load from Snowflake.
 
-        returns:
-            df: Pandas dataframe
+    :return: Pandas DataFrame containing the data from Snowflake.
     """
-    # Validate config path
-    if sf_cre_path.split(".")[-1] not in ["cfg", "config"]:
-        raise Exception("The path must be in .cfg or .config format.")
-
     # Load project configuration
     config = configparser.ConfigParser()
     config.read(sf_cre_path)
 
-    # Connecting to Snowflake
-    snowflake_conn_prop = {
-        "account": config['Snowflake']['account'],
-        "user": config['Snowflake']['user'],
-        "password": config['Snowflake']['password'],
-        "role": config['Snowflake']['role'],
-        "database": config['Snowflake']['database'],
-        "schema": config['Snowflake']['schema'],
-        "warehouse": config['Snowflake']['warehouse'],
-    }
-    session = Session.builder.configs(snowflake_conn_prop).create()
-    # Load data into Pandas dataframe
-    data_obj = session.table(table).select(
-            *[col(column) for column in columns]
-        )
-    df = data_obj.toPandas()
+    # Snowflake Config
+    engine = create_engine(URL(
+        account=config['Snowflake']['account'],
+        user=config['Snowflake']['user'],
+        password=config['Snowflake']['password'],
+        database=config['Snowflake']['database'],
+        warehouse=config['Snowflake']['warehouse'],
+        role=config['Snowflake']['role'],
+    ))
+
+    # Execute SQL query to retrieve data from Snowflake
+    query = f"{sf_query}"
+    df = pd.read_sql_query(query, con=engine)
+
+    # Clean up resources
+    engine.dispose()
 
     return df
-    
 
-def load_query(sf_cre_path: str, query: str):
+import pandas as pd
+from sqlalchemy import create_engine
+
+def sf_table_to_df(sf_cre_path: str, sf_schema_name: str, sf_table_name: str, columns_to_select: list = None):
     """
-    Returns result of Snowflake query as a Pandas dataframe.
+    Load a table from Snowflake into a Pandas DataFrame.
 
-    :param sf_cre_path: path to Snowflake credentials config file
-    :param query: query that need to be ran
+    :param sf_cre_path: Path to Snowflake credentials file.
+    :param sf_schema_name: Name of the schema containing the table to load from Snowflake.
+    :param sf_table_name: Name of the table to load from Snowflake.
+    :param columns_to_select: List of columns to select from the table. If None, all columns are selected.
 
-        returns:
-            df: Pandas dataframe
+    :return: Pandas DataFrame containing the data from Snowflake.
     """
-    # Validate config path
-    if sf_cre_path.split(".")[-1] not in ["cfg", "config"]:
-        raise Exception("The path must be in .cfg or .config format.")
-
     # Load project configuration
     config = configparser.ConfigParser()
     config.read(sf_cre_path)
 
-    # Connecting to Snowflake
-    snowflake_conn_prop = {
-        "account": config['Snowflake']['account'],
-        "user": config['Snowflake']['user'],
-        "password": config['Snowflake']['password'],
-        "role": config['Snowflake']['role'],
-        "database": config['Snowflake']['database'],
-        "schema": config['Snowflake']['schema'],
-        "warehouse": config['Snowflake']['warehouse'],
-    }
-    session = Session.builder.configs(snowflake_conn_prop).create()
-    # Load data into Pandas dataframe
-    data_obj = session.sql(query)
-    df = data_obj.toPandas()
+    # Fill in your Snowflake details here
+    engine = create_engine(URL(
+        account=config['Snowflake']['account'],
+        user=config['Snowflake']['user'],
+        password=config['Snowflake']['password'],
+        database=config['Snowflake']['database'],
+        warehouse=config['Snowflake']['warehouse'],
+        role=config['Snowflake']['role']
+    ))
+    connection = engine.connect()
+    # Read the table directly into a DataFrame
+    df = pd.read_sql_table(sf_table_name, schema=sf_schema_name, columns=columns_to_select,con=engine )
+                                                        
+    # Clean up resources
+    connection.close()
+    engine.dispose()
 
     return df
 
-
-def df_to_snowflake(sf_cre_path: str, df_name, sf_table_name: str, if_exists: str = 'replace'):
+def df_to_snowflake(sf_cre_path: str, df_name, sf_schema_name: str, sf_table_name: str, if_exists: str = 'replace'):
     """
     Load a Pandas DataFrame into Snowflake.
 
@@ -92,6 +85,7 @@ def df_to_snowflake(sf_cre_path: str, df_name, sf_table_name: str, if_exists: st
         replace (default) = Drop and recreate table.
         append = Append data to existing table.
 
+    :return: Table in Snowflake is updated
     """
     # Load project configuration
     config = configparser.ConfigParser()
@@ -100,13 +94,12 @@ def df_to_snowflake(sf_cre_path: str, df_name, sf_table_name: str, if_exists: st
     # Create DataFrame
     df = df_name
     
-    # Fill in your SFlake details here
+    # Snowflake Config
     engine = create_engine(URL(
         account=config['Snowflake']['account'],
         user=config['Snowflake']['user'],
         password=config['Snowflake']['password'],
         database=config['Snowflake']['database'],
-        schema=config['Snowflake']['schema'],
         warehouse=config['Snowflake']['warehouse'],
         role=config['Snowflake']['role'],
     ))
@@ -114,7 +107,7 @@ def df_to_snowflake(sf_cre_path: str, df_name, sf_table_name: str, if_exists: st
     connection = engine.connect()
     
     # table name must be LOWERCASE
-    df.to_sql(sf_table_name, con=engine, index=False, if_exists='replace') #make sure index is False, Snowflake doesnt accept indexes
+    df.to_sql(sf_table_name, schema=sf_schema_name, con=engine, index=False, if_exists='replace') #make sure index is False, Snowflake doesnt accept indexes
     
     connection.close()
     engine.dispose()
