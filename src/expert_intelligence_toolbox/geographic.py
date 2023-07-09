@@ -196,7 +196,7 @@ def convert_list_to_uk_geog(locations_list: str, lsoa_boundary_files_path: str, 
         'lsoa': returns LSOA code and name 
         'msoa': returns MSOA code and name
         'la': returns LA code and name
-        'overview': returns all three pairs
+        'overview': returns all three pairs 
         'raw':  returns the raw join results including geometry column
     '''
 
