@@ -1,5 +1,5 @@
 """
-This file contains method to interact with Snowflake using Snowpark
+This file contains method to interact with Snowflake using Snowpark.
 """
 import configparser
 from snowflake.sqlalchemy import URL

@@ -172,8 +172,85 @@ def convert_string_to_uk_geog(location: str, lsoa_boundary_files_path: str, lsoa
         return join_result
 
 
-def convert_list_to_uk_geog(locations_list: str, lsoa_boundary_files_path: str, lsoa_msoa_la_lookup_path: str, output_geog: str = 'overview'):
+def convert_list_to_boundaries(country: str, locations_list: str, return_geometry: bool = True):
     '''
+    This function takes a list of location names and returns the boundary of each location.
+
+    It will not work for areas which are commonly considered to not have a boundary.
+    For example, Kentish Town in London is a neighbourhood, and does not have boundaries (think 'city limits').
+
+    The function is able to handle multiple places with identical names in the same country, as it will
+    has coordinates into individual polygons based on their geohash.
+
+    Variables:
+    country: Country name
+    location: Location name
+    return_geometry (default = True): 
+        If True, returns a geopandas dataframe with polygon(s) of locations. 
+        If false, returns coordinates of the boundary.
+        
+    '''
+
+    # Create dataframe to store results, with index, geohash, geometry columns
+    return_polygons_df = pd.DataFrame(columns=['input_location', 'geohash', 'geometry'])
+    return_coordinates_df = pd.DataFrame(columns=['input_location', 'type', 'id', 'lat', 'long', 'geohash', 'geometry'])
+
+    overpass = Overpass()
+
+    for location in locations_list:
+        query = f'''
+        area[name="{country}"];
+        (
+        relation["type"="boundary"]["name"="{location}"](area);
+        );
+        (._;>;);
+        out body;
+        '''
+
+        r = overpass.query(query)
+
+        filtered = [i for i in r.toJSON()['elements'] if 'tags' not in i.keys()]
+
+        coordinates_df = pd.DataFrame(filtered)
+
+        # filter out the points
+        coordinates_df = coordinates_df[coordinates_df['type'] == 'node']
+
+        # create a hash by grouping lat and lon
+        coordinates_df["geohash"] = coordinates_df.apply(lambda r: geolib.geohash.encode(r["lon"], r["lat"], 3), axis=1)
+
+        # create a geodataframe to store the points
+        gdf = gpd.GeoDataFrame(
+            coordinates_df, geometry=gpd.points_from_xy(coordinates_df["lon"], coordinates_df["lat"]), crs="epsg:4386"
+        )
+        # cluster points to polygons as a new geodataframe using convex hull
+        polygons = gdf.dissolve(by="geohash", aggfunc={"type": "first", "id":"count"})
+        polygons["geometry"] = polygons["geometry"].convex_hull
+
+        # add input location
+        coordinates_df['input_location'] = location
+        polygons['input_location'] = location
+
+        # drop Id and Type columns
+        polygons = polygons.drop(columns=["id", "type"]).reset_index()
+
+        # Return a polygon by fault, or coordinates if requested
+        if return_geometry == True:
+            # concat to dataframe using concat method
+            return_polygons_df = pd.concat([return_polygons_df, polygons])
+            
+        else:
+            return_coordinates_df = pd.concat([return_coordinates_df, coordinates_df])
+        
+    if return_geometry == True:
+        return return_polygons_df
+    else:
+        return return_coordinates_df
+
+
+
+def convert_list_to_uk_geog(locations_list: str, lsoa_boundary_files_path: str, lsoa_msoa_la_lookup_path: str, output_geog: str = 'overview'):
+    ''' 
     This function converts a location to a list of LSOAs, MSOAs, or LAs.
     This current version only works for England and Wales (LSOAs), and not Scotland or Northern Ireland.
 
@@ -320,8 +397,6 @@ def convert_list_to_uk_geog(locations_list: str, lsoa_boundary_files_path: str, 
     elif output_geog == 'raw':
         return all_results_join_result
         
-
-
 
 def convert_string_to_coordinates(path_to_input_csv:str, path_to_output_csv:str, append_str_to_input: str = ''):
     '''
