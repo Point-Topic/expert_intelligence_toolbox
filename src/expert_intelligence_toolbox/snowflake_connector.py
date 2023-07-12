@@ -107,7 +107,7 @@ def df_to_snowflake(sf_cre_path: str, df_name, sf_schema_name: str, sf_table_nam
     connection = engine.connect()
     
     # table name must be LOWERCASE
-    df.to_sql(sf_table_name, schema=sf_schema_name, con=engine, index=False, if_exists='replace') #make sure index is False, Snowflake doesnt accept indexes
+    df.to_sql(sf_table_name, schema=sf_schema_name, con=engine, index=False, if_exists='replace', chunksize=16000) #make sure index is False, Snowflake doesnt accept indexes
     
     connection.close()
     engine.dispose()
