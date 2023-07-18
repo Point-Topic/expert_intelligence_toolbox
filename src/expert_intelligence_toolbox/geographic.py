@@ -516,3 +516,59 @@ def convert_coordinates_to_address(path_to_input_csv: str, path_to_output_csv: s
             })
 
     print("Conversion complete.")
+
+
+
+
+def disaggregate_geography_output_pop_is_pop(input_dataframe,key_dataframe, output_pop_column, input_geo, output_geo, metrics):
+    """
+    This function disaggregates data from one geography to another based on a key table.
+    
+    'input' refers to the geography that the data is currently reported at, and 'output' refers to the geography that the data will be disaggregated to.
+    'output_pop_is_pop' means that populations for e.g. fttp are based on the population of the output geography, not the input geography.
+    i.e. input_metric_percent * output_pop = output_metric_pop
+
+    input_geo and output_geo require at least a _id suffix, e.g. 'ekg_id'. the _name suffix is optional, e.g. 'ekg_name' (which does not exist).
+    
+
+    :param input_dataframe: Name of dataframe to be disaggregated. It can contain reported_at column, then the disaggregation will be done for each date.
+    :param key_dataframe: Name of dataframe with key (lookup) between input and output geography. This table cannot contain a date column.
+    :param output_pop_column: Name of column in key_dataframe containing the population of the output geography.
+    :param input_geo: Name of input geography. Enter it without suffix, e.g. 'ekg' not 'ekg_id'.
+    :param output_geo: Name of output geography. Enter it without suffix, e.g. 'nuts3' not 'nuts3_id'.
+    :param metrics: List of metrics to be disaggregated. Enter them without suffix, e.g. 'fttp' not 'fttp_percent'. Enter as list, e.g. ['fttp', 'wimax']
+
+    """
+    
+    percent_metrics = []
+    pop_metrics = []
+    for metric in metrics:
+        percent_metrics = percent_metrics + [metric + '_percent']
+        pop_metrics = pop_metrics + [metric + '_pop']
+
+    input_geo_id = input_geo + '_id'
+    input_geo_name = input_geo + '_name'
+    output_geo_id = output_geo + '_id'
+    output_geo_name = output_geo + '_name'
+
+    # drop input geometry column if exists
+    if 'geometry' in input_dataframe.columns:
+        input_dataframe = input_dataframe.drop(columns=['geometry'])
+
+    # drop input_geo_name column if exists in both tables to avoid duplicate columns
+    if input_geo_name in input_dataframe.columns and input_geo_name in key_dataframe.columns:
+        input_dataframe = input_dataframe.drop(columns=[input_geo_name])
+    
+    # drop columns in key_dataframe not in [input_geo_id, input_geo_name, output_geo_id, output_geo_name, output_pop_column, 'geometry'] if they exist
+    for column in key_dataframe.columns:
+        if column not in [input_geo_id, input_geo_name, output_geo_id, output_geo_name, output_pop_column, 'geometry']:
+            key_dataframe = key_dataframe.drop(columns=[column])
+
+    # join
+    output_dataframe = pd.merge(key_dataframe,input_dataframe, on=input_geo_id, how='left')
+
+    # calculate pop metrics
+    for metric in metrics:
+        output_dataframe[metric + '_pop'] = output_dataframe[metric + '_percent'] * output_dataframe[output_pop_column]
+    
+    return output_dataframe
