@@ -579,6 +579,15 @@ def disagg_geog_to_ekg_mixed_geog_releases_pop(input_dataframe, key_dataframe, n
     This function disaggregates population data from NUTS3 to EKG level. 
     It takes as input a dataframe containing population data at NUTS3 level, a dataframe containing the EKG-NUTS3 lookup, a dataframe containing the NUTS release years, and a list of metrics to disaggregate. 
     It returns a dataframe containing the disaggregated population data at EKG level. 
+    
+    :param input_dataframe: Name of dataframe with the population to be disaggregated. In long format.
+    :param key_dataframe: Name of dataframe with key (lookup) between input and output geography. This table cannot contain a date column.
+    :param nuts_releases_lookup: Lookup table between country-reporting year-NUTS release year. Column 'match' is either 'yes' or 'no' depending on whether there is a match.
+    :param input_geo: Name of input geography. Enter it without suffix, e.g. 'nuts3' not 'nuts3_id'. For now, only tested with NUTS3.
+    :param output_geo: Name of output geography. Enter it without suffix, e.g. 'ekg' not 'ekg_id'. For now, only tested with EKG.
+    :param input_pop_column: Name of column in input_dataframe containing the population of the input geography.
+    :param output_pop_weight_column: Name of column in key_dataframe containing the population of the output geography which will be used as a weight.
+
     """
 
     input_geo_id = input_geo + '_id'
@@ -618,3 +627,76 @@ def disagg_geog_to_ekg_mixed_geog_releases_pop(input_dataframe, key_dataframe, n
                 print('Warning! No matching NUTS version for country ',country,' and year ',year)
 
     return all_results_df
+
+
+def disagg_geog_to_ekg_mixed_geog_releases_percent(input_dataframe, key_dataframe,nuts_releases_lookup, output_pop_column, input_geo, output_geo, metrics, output_directory):
+    """
+    This function disaggregates percentage metrics from an input geography down to EKG level, using a key dataframe. The key dataframe MUST have a country_code column.
+    No populations will be calculated as part of this process, and the output_pop_column is only retained to be passed to the output dataframe but not used in calculations. 
+    The output_directory must be a DIRECTORY, not a filename.
+
+    :param input_dataframe: The input dataframe to disaggregate. Must have a country_code column.
+    :param key_dataframe: The key dataframe to use for disaggregation. Cannot have a reported_at/date column.
+    :param nuts_releases_lookup: The lookup table to use to match country_code and reported_at to a NUTS release year.
+    :param output_pop_column: The name of the column in the input_dataframe that contains the population of the input geography. 
+    This will be passed to the output dataframe but not used in calculations.
+    :param input_geo: The name of the input geography. Must be passed without siffixes. e.g. 'nuts', not 'nuts_id'.
+    :param output_geo: The name of the output geography. Must be passed without siffixes. e.g. 'ekg', not 'ekg_id'.
+    :param metrics: A list of metrics to disaggregate. Must be passed without suffixes. e.g. 'overall_fixed_broadband_coverage', not 'overall_fixed_broadband_coverage_percent'.
+    :param output_directory: The directory to save the output disaggregated dataframes to. Must be a directory, not a filename. e.g.: 'bin/ebm/historic/02_transform/'
+    """
+    warnings = 0
+    all_years = input_dataframe['reported_at'].unique()
+    
+    input_geo_id = input_geo + '_id'
+    input_geo_name = input_geo + '_name'
+    output_geo_id = output_geo + '_id'
+    output_geo_name = output_geo + '_name'
+    
+    country_names = input_dataframe[input_geo_id].str[:2].unique()
+    percent_metrics = []
+    pop_metrics = []
+    for metric in metrics:
+            percent_metrics = percent_metrics + [metric + '_percent']
+            pop_metrics = pop_metrics + [metric + '_pop']
+
+    for country in country_names:
+            all_results_df = pd.DataFrame()
+            for year in all_years:
+                    try:
+                            matching_nuts_version = nuts_releases_lookup[(nuts_releases_lookup['country_code'] == country) & (nuts_releases_lookup['reported_at'] == year) & (nuts_releases_lookup['match'] == 'yes')]['release_year'].values[0]
+                            print('Disaggregating country ',country,'for year ',year,'. First matching NUTS version found is ', matching_nuts_version)
+
+                            #input and key dataframe filtered by country
+                            input_dataframe_country = input_dataframe[(input_dataframe['country_code'] == country)]
+
+                            key_dataframe_country = key_dataframe[(key_dataframe[f'{input_geo_id}_{matching_nuts_version}'].str[:2] == country)]
+                            
+                            # we drop columns again because we still have all 5 releases in here. we want only the chosen one now. 
+                            for column in key_dataframe_country.columns:
+                                    if column not in [f'{output_geo_id}',output_pop_column, f'{input_geo_id}_{matching_nuts_version}', 'geometry']: 
+                                            key_dataframe_country = key_dataframe_country.drop(columns=[column])
+                            key_dataframe_country = key_dataframe_country.rename(columns = {f'{input_geo_id}_{matching_nuts_version}': f'{input_geo_id}'})
+                            
+                            input_dataframe_country = input_dataframe_country[input_dataframe_country[f'{input_geo_id}'].str.len() == 5]
+
+                            output_dataframe = pd.merge(key_dataframe_country, input_dataframe_country, on=f'{input_geo_id}', how='left')
+                            
+                            for column in output_dataframe.columns: # because these are at NUTS3 level, not EKG level.
+                                    if column in [f'{input_geo_id}',f'{input_geo_name}']:
+                                            output_dataframe = output_dataframe.drop(columns=[column])
+                            
+                            # COMMENTING OUT FOR NOW
+                            # for metric in metrics:
+                            #         output_dataframe[metric + '_pop'] = output_dataframe[metric + '_percent'] * output_dataframe[output_pop_column]
+
+                            all_results_df = pd.concat([all_results_df, output_dataframe])
+                    except:
+                            print('Warning! No matching NUTS version for ', country, 'in year ', year)
+                            warnings +=1
+                            pass
+            
+
+            all_results_df.to_csv(f'{output_directory}/disagg_output_{country}.csv',index=False)
+    if warnings != 0:
+            print('Attention: There were ',warnings,' warnings during this run.')
