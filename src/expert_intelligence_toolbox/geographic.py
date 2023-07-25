@@ -572,3 +572,49 @@ def disaggregate_geography_output_pop_is_pop(input_dataframe,key_dataframe, outp
         output_dataframe[metric + '_pop'] = output_dataframe[metric + '_percent'] * output_dataframe[output_pop_column]
     
     return output_dataframe
+
+
+def disagg_geog_to_ekg_mixed_geog_releases_pop(input_dataframe, key_dataframe, nuts_releases_lookup, input_geo, output_geo, input_pop_column, output_pop_weight_column): # , output_directory
+    """
+    This function disaggregates population data from NUTS3 to EKG level. 
+    It takes as input a dataframe containing population data at NUTS3 level, a dataframe containing the EKG-NUTS3 lookup, a dataframe containing the NUTS release years, and a list of metrics to disaggregate. 
+    It returns a dataframe containing the disaggregated population data at EKG level. 
+    """
+
+    input_geo_id = input_geo + '_id'
+    input_geo_name = input_geo + '_name'
+    output_geo_id = output_geo + '_id'
+    output_geo_name = output_geo + '_name'
+    all_results_df = pd.DataFrame()
+    for year in input_dataframe['reported_at'].unique():
+        input_dataframe_year = input_dataframe[input_dataframe['reported_at'] == year]
+        for country in input_dataframe[input_geo_id].str[:2].unique():
+            try: 
+                matching_nuts_version = nuts_releases_lookup[(nuts_releases_lookup['country_code'] == country) & (nuts_releases_lookup['reported_at'] == year) & (nuts_releases_lookup['match'] == 'yes')]['release_year'].values[0]
+                
+                print('Now disaggregating population data for year ',year,' and country ',country,' using NUTS version ',matching_nuts_version,'.')
+                
+                input_dataframe_country = input_dataframe_year[(input_dataframe_year[f'{input_geo_id}'].str[:2] == country)]
+                key_dataframe_country = key_dataframe[(key_dataframe[f'{input_geo_id}_{matching_nuts_version}'].str[:2] == country)]
+                # we drop columns again because we still have all 5 releases in here. we want only the chosen one now. 
+                for column in key_dataframe_country.columns:             
+                        if column not in [f'{output_geo_id}', f'{output_pop_weight_column}', f'{input_geo_id}_{matching_nuts_version}', 'country_code', 'geometry']: 
+                                key_dataframe_country = key_dataframe_country.drop(columns=[column])
+                key_dataframe_country = key_dataframe_country.rename(columns = {f'{input_geo_id}_{matching_nuts_version}': f'{input_geo_id}'})
+                
+                # for each EKG, add a weight which is equal to pop_weight as proportion of sum(prop_weight) for entire NUTS3
+                # weight, as a proportion of 1, is the proportion of output_pop_weight_column as a proportion of that NUTS3, for the relevant NUTS release version. 
+                
+                key_dataframe_country['weight'] = key_dataframe_country[f'{output_pop_weight_column}'] / key_dataframe_country.groupby([f'{input_geo_id}'])[f'{output_pop_weight_column}'].transform('sum')
+                
+                output_dataframe = pd.merge(key_dataframe_country,input_dataframe_country,how='left',left_on=[f'{input_geo_id}'],right_on=[input_geo_id])
+
+                output_dataframe[f'{output_geo}_pop'] = round(output_dataframe[f'{input_pop_column}'] * output_dataframe['weight'],4)
+                
+                output_dataframe.drop(columns=['weight',f'{input_pop_column}',f'{input_geo_id}'],inplace=True) # because these are at NUTS3 level, not EKG level.
+                all_results_df = pd.concat([all_results_df, output_dataframe])
+                
+            except:
+                print('Warning! No matching NUTS version for country ',country,' and year ',year)
+
+    return all_results_df
