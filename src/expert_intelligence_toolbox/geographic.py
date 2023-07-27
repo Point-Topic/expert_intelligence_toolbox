@@ -667,8 +667,8 @@ def disagg_geog_to_ekg_mixed_geog_releases_percent(input_dataframe, key_datafram
                             matching_nuts_version = nuts_releases_lookup[(nuts_releases_lookup['country_code'] == country) & (nuts_releases_lookup['reported_at'] == year) & (nuts_releases_lookup['match'] == 'yes')]['release_year'].values[0]
                             print('Disaggregating country ',country,'for year ',year,'. First matching NUTS version found is ', matching_nuts_version)
 
-                            #input and key dataframe filtered by country
-                            input_dataframe_country = input_dataframe[(input_dataframe['country_code'] == country)]
+                            #input and key dataframe filtered by country (and year for input)
+                            input_dataframe_country = input_dataframe[(input_dataframe['country_code'] == country) & (input_dataframe['reported_at'] == year)]
 
                             key_dataframe_country = key_dataframe[(key_dataframe[f'{input_geo_id}_{matching_nuts_version}'].str[:2] == country)]
                             
