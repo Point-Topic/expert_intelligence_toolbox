@@ -1,10 +1,12 @@
 # Expert Intelligence Toolbox
 
-Expert Intelligence is a company working with data, and with geographies. These are our tools.
+Expert Intelligence is a broadband research company. Our work involves geographic data across different granularities and classification systems.
 
-This is an experimental v0.1, which currently serves no function other than testing.
+This toolbox contains functions to help us do our work.
 
-You (Mac) may also need to install lxml to use this, which will need to be downloaded separately first.
+Mac users may need to install lxml, which will need to be downloaded separately first.
+
+Internal users: Use 'instructions.md' for information on maintaining this package.
 
 ```
 xcode-select --install
