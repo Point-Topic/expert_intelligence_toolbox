@@ -36,7 +36,6 @@ Mac/Unix:\
 
 Finally, for both:\
 `twine upload --skip-existing dist/*` (for real package)\
-`twine upload --skip-existing --repository testpypi dist/*` (for testpypi)
 
 
 When prompted for credentials:\
