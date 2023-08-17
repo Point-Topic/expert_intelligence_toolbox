@@ -23,10 +23,10 @@ def logistic_forecast_distributed_country_growth(input_df, country_totals_df, me
             for i in regions:
                 s += (1+shift-i)*i
 
+        proportionality_const = country_total_change / s
 
         if country_total_change > 0:
             try:
-                proportionality_const = country_total_change / s
                 regions_year2 = [i + proportionality_const*(1-i)*(i+shift)*I for i in regions]
                 difference = [0]*len(regions)
                 for i in range(0, len(regions)):
@@ -39,7 +39,6 @@ def logistic_forecast_distributed_country_growth(input_df, country_totals_df, me
                 print(f'Overall growth is zero. Coverage in {year_to_forecast} is equal to {year_to_forecast-1}.')
         elif country_total_change < 0:
                 try:
-                    proportionality_const = -1 * (country_total_change / s)
                     regions_year2 = [i + proportionality_const*(1-i+shift)*(i)*I for i in regions]
                     difference = [0]*len(regions)
                     for i in range(0, len(regions)):
