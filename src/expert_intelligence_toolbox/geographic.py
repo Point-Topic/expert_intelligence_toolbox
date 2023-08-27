@@ -6,7 +6,9 @@ import geopandas as gpd
 import pandas as pd
 import time
 import csv
-
+import snowflake_connector
+from shapely.wkt import loads as wkt_loads
+import geopandas as gpd
 
 def convert_string_to_boundary(country: str, location: str, return_geometry: bool = True):
     '''
@@ -51,7 +53,7 @@ def convert_string_to_boundary(country: str, location: str, return_geometry: boo
 
     # create a geodataframe to store the points
     gdf = gpd.GeoDataFrame(
-        coordinates_df, geometry=gpd.points_from_xy(coordinates_df["lon"], coordinates_df["lat"]), crs="epsg:4386"
+        coordinates_df, geometry=gpd.points_from_xy(coordinates_df["lon"], coordinates_df["lat"]), crs="epsg:4326"
     )
     # cluster points to polygons as a new geodataframe using convex hull
     polygons = gdf.dissolve(by="geohash", aggfunc={"type": "first", "id":"count"})
@@ -117,7 +119,7 @@ def convert_string_to_uk_geog(location: str, lsoa_boundary_files_path: str, lsoa
 
     # create a geodataframe to store the points
     gdf = gpd.GeoDataFrame(
-        coordinates_df, geometry=gpd.points_from_xy(coordinates_df["lon"], coordinates_df["lat"]), crs="epsg:4386"
+        coordinates_df, geometry=gpd.points_from_xy(coordinates_df["lon"], coordinates_df["lat"]), crs="epsg:4326"
     )
     # cluster points to polygons as a new geodataframe using convex hull
     polygons = gdf.dissolve(by="geohash", aggfunc={"type": "first", "id":"count"})
@@ -143,8 +145,8 @@ def convert_string_to_uk_geog(location: str, lsoa_boundary_files_path: str, lsoa
     print('There are ' + str(num_polygons) + ' polygons in the input location.')
     print(polygons)
     
-    # Project lsoa_boundary_file to epsg:4386 CRS
-    lsoa_boundary_file = lsoa_boundary_file.to_crs('epsg:4386')
+    # Project lsoa_boundary_file to epsg:4326 CRS
+    lsoa_boundary_file = lsoa_boundary_file.to_crs('epsg:4326')
 
     # This will return all LSOAs that are within the polygon
     print('Performing spatial join...')
@@ -221,7 +223,7 @@ def convert_list_to_boundaries(country: str, locations_list: str, return_geometr
 
         # create a geodataframe to store the points
         gdf = gpd.GeoDataFrame(
-            coordinates_df, geometry=gpd.points_from_xy(coordinates_df["lon"], coordinates_df["lat"]), crs="epsg:4386"
+            coordinates_df, geometry=gpd.points_from_xy(coordinates_df["lon"], coordinates_df["lat"]), crs="epsg:4326"
         )
         # cluster points to polygons as a new geodataframe using convex hull
         polygons = gdf.dissolve(by="geohash", aggfunc={"type": "first", "id":"count"})
@@ -289,8 +291,8 @@ def convert_list_to_uk_geog(locations_list: str, lsoa_boundary_files_path: str, 
     # Read in the LSOA boundary files
     print('Reading in LSOA boundary file... This will take a while...')
     lsoa_boundary_file = gpd.read_file(lsoa_boundary_files_path)
-    # Drop all columns except for LSOA21CD and geometry and reset index and project to epsg:4386 CRS
-    lsoa_boundary_file = lsoa_boundary_file[['LSOA21CD', 'geometry']].reset_index(drop=True).to_crs('epsg:4386')
+    # Drop all columns except for LSOA21CD and geometry and reset index and project to epsg:4326 CRS
+    lsoa_boundary_file = lsoa_boundary_file[['LSOA21CD', 'geometry']].reset_index(drop=True).to_crs('epsg:4326')
     
     # Read in the LSOA-MSOA-LA lookup table
     # only read in LSOA21CD, LSOA21NM, (LSOA code and name) MSOA21CD, MSOA21NM, (MSOA code and name) LAD22CD, LAD22NM (LA code and name)
@@ -322,7 +324,7 @@ def convert_list_to_uk_geog(locations_list: str, lsoa_boundary_files_path: str, 
 
             # create a geodataframe to store the points
             gdf = gpd.GeoDataFrame(
-                coordinates_df, geometry=gpd.points_from_xy(coordinates_df["lon"], coordinates_df["lat"]), crs="epsg:4386"
+                coordinates_df, geometry=gpd.points_from_xy(coordinates_df["lon"], coordinates_df["lat"]), crs="epsg:4326"
             )
             # cluster points to polygons as a new geodataframe using convex hull
             polygons = gdf.dissolve(by="geohash", aggfunc={"type": "first", "id":"count"})
@@ -700,3 +702,240 @@ def disagg_geog_to_ekg_mixed_geog_releases_percent(input_dataframe, key_datafram
             all_results_df.to_csv(f'{output_directory}/disagg_output_{country}.csv',index=False)
     if warnings != 0:
             print('Attention: There were ',warnings,' warnings during this run.')
+
+
+def operator_footprint_analysis_uk(sf_cre_path: str, upc_operator_name: str, roadworks_promoter_organisation:str, altnet_build_locations_operator_name: str, df_altnet_build_locations: pd.DataFrame = None):
+    """
+    This function takes the name of a UK operator as an input, and returns a DataFrame of postcodes covering:
+    - operator's current footprint
+    - 500m buffer around current footprint
+    - postcodes within build locations according to the altnet build table (Q2 2023)
+    - 500m buffer around all roadworks by that operator
+
+    The DataFrame will have three columns: 'postcode', 'type', 'geometry'
+    Where 'type' refers to the source of the postcode: footprint, buffer, build_location or roadworks
+
+    Should you not wish to search for any roadworks or altnet build locations, simply use an empty string
+    as the input for the corresponding parameter.
+
+    :param sf_cre_path: Path to Snowflake credentials file.
+    :param upc_operator_name: Operator name, as per FACT_OPERATOR table.
+    :param roadworks_promoter_organisation: Promoter organisation, as per STG_PERMIT table (Roadworks API). Can be empty string ('') if not found.
+    :param altnet_build_locations_operator_name: Operator name, as per altnet build locations table (Q2 2023). Can be empty string ('') if not found.
+    :param df_altnet_build_locations: (optional) DataFrame with columns 'Operator', 'Coverage Area', 'Coverage Area' ('Coverage Area' can be repeated as many times as needed)
+        e.g.:
+        Operator,Coverage Area,Coverage Area,Coverage Area
+        1310 (Wirehive),Basingstoke,Farnborough,Reading
+        4 Fibre (SCCI Group),Forest Hill,Brentford,Portsmouth
+    
+
+    :return: Pandas DataFrame containing the data from Snowflake, with 3 columns 'postcode', 'type', 'geometry'
+
+    When executed, this function calls the below existing expert_intelligence_toolbox functions:
+    snowflake_connector.sf_query_to_df
+    geographic.convert_list_to_boundaries
+    """
+
+
+    # Get current footprint from UPC database AND get footprint with buffer
+
+    print('Now retrieving current operator footprint, and footprint with buffer, from fact_operator...')
+    footprint_and_buffer_postcodes_all = snowflake_connector.sf_query_to_df(sf_cre_path, 
+    f'''
+    with 
+    postcode_geog as (
+        select
+            pcds as postcode,
+            to_geometry(geometry) as geometry
+        from edgap_geo_staging.ons.dim_pcd_uk_ons_nspl_geog_2022_05
+        
+    ),
+    isp_footprint as (
+        select 
+            postcode,
+            msoa_and_im as msoa
+        from ANALYTICS_MAIN.REPORTS.FACT_OPERATOR
+        left join ANALYTICS_MAIN.REPORTS.UPC_OUTPUT using (postcode)
+        where operator = '{upc_operator_name}'
+        --and postcode = 'TA6 7HX' --for testing
+    ),
+    isp_footprint_w_geog as (
+        select 
+            postcode,
+            'footprint' as type,
+            geometry as geometry
+        from isp_footprint
+        left join postcode_geog
+        using (postcode)
+    ),
+
+    create_buffer AS (
+        SELECT 
+            p2.postcode as postcode,
+            'buffer' as type,
+            p2.geometry AS geometry
+        FROM isp_footprint_w_geog p
+        LEFT JOIN postcode_geog p2 ON 
+            ST_Intersects(ST_Buffer(p.geometry, 0.01), p2.geometry) AND
+            p2.postcode <> p.postcode 
+            where p2.postcode in ( -- only search in postcodes part of MSOAs which are covered by that ISP
+                select postcode from ANALYTICS_MAIN.REPORTS.UPC_OUTPUT where msoa_and_im in (
+                select msoa from isp_footprint
+            ))
+    ),
+    union_all as (
+        select 
+            postcode,
+            type,
+            st_aswkt(geometry) as geometry
+        from create_buffer
+        where postcode not in (select postcode from isp_footprint_w_geog)
+        union 
+        select 
+            postcode,
+            type,
+            st_aswkt(geometry) as geometry
+        from isp_footprint_w_geog
+    )
+    select * from union_all
+    ''')
+    print('Retrieving current and buffer footprint successful.')
+    
+
+    # Get roadworks locations from UPC database (!!assuming they are in EPSG:27700. In the future, we want to reference a FACT table, not STG)
+    
+    print('Now retrieving roadworks locations from Roadworks API data...')
+    roadworks = snowflake_connector.sf_query_to_df(sf_cre_path, 
+    f'''
+    select 
+        promoter_organisation, 
+        works_location_coordinates 
+    from
+    ROADWORKS.STAGING.STG_PERMIT
+    where promoter_organisation = '{roadworks_promoter_organisation}'
+    and event_type in ('WORK_START', 'PERMIT_GRANTED')
+    ''')
+
+    roadworks['works_location_coordinates'] = roadworks['works_location_coordinates'].apply(wkt_loads)
+    roadworks = gpd.GeoDataFrame(roadworks, geometry='works_location_coordinates', crs='epsg:27700')
+    roadworks = roadworks.to_crs('epsg:4326')
+    roadworks = pd.DataFrame(roadworks)
+    
+    # Now, we want to create a 500m buffer around each roadworks location
+
+    print(str(roadworks.shape[0]) + ' relevant roadworks events found. Now creating 500m buffer around each event and retrieving postcodes...')
+    roadworks_postcodes_all = pd.DataFrame(columns=['postcode', 'type', 'geometry'])
+    for roadwork in roadworks['works_location_coordinates']:
+        roadworks_postcodes = snowflake_connector.sf_query_to_df(sf_cre_path, 
+        f'''
+        with
+        postcode_geog as (
+        select
+            pcds as postcode,
+            to_geometry(geometry) as geometry
+        from edgap_geo_staging.ons.dim_pcd_uk_ons_nspl_geog_2022_05
+        ),
+
+        roadwork_geog as (
+            select
+                'roadwork' as postcode,
+                to_geometry('{roadwork}') as geometry
+        ),
+
+        create_buffer AS (
+            SELECT 
+                p2.postcode as postcode,
+                'roadworks' as type,
+                p2.geometry AS geometry
+            FROM roadwork_geog p
+            LEFT JOIN postcode_geog p2 ON 
+                ST_Intersects(ST_Buffer(p.geometry, 0.01), p2.geometry) 
+            limit 10 -- to limit execution time, roadworks postcodes are only supposed to act as a seed anyway.
+        ),
+        format_wkt as (
+            select 
+                postcode,
+                type,
+                st_aswkt(geometry) as geometry
+            from create_buffer
+        )
+        select * from format_wkt
+        ''')
+        
+        roadworks_postcodes_all = pd.concat([roadworks_postcodes_all, roadworks_postcodes])
+    
+    print('Retrieving roadworks postcodes successful.')
+
+    # Get build locations from altnet build table (Q2 2023)
+
+    print('Now retrieving build locations from altnet build table...')
+    # If no altnet build locations are provided, create an empty dummy DataFrame 
+    if df_altnet_build_locations is None:
+        build_locations = pd.DataFrame(columns=['Operator', 'Coverage Area'])
+        row_values_list = []
+        print('No build locations table was provided.')
+    else:
+        build_locations = df_altnet_build_locations
+        # Filter out all operators except the one we want
+        build_locations = build_locations[build_locations['Operator'] == altnet_build_locations_operator_name]
+        try:
+            row_values_list = build_locations.iloc[0].tolist()
+        except:
+            print('No build locations were found for the given operator:' + altnet_build_locations_operator_name)
+            row_values_list = []
+
+    # Filter out 'nan' values from the list
+    filtered_row_values_list = [value for value in row_values_list if str(value) != 'nan' and str(value) != altnet_build_locations_operator_name]
+
+    print(f'The following build locations were found for {filtered_row_values_list}:')
+
+    # Now convert the list of build locations to a list of boundaries
+    build_locations = convert_list_to_boundaries('United Kingdom', filtered_row_values_list)
+    
+    print('Retrieving build location boundaries successful. Now retrieving postcodes for build locations...')
+
+    # iterate through each 'geometry' in build_locations
+    build_location_postcodes_all = pd.DataFrame(columns=['postcode', 'type', 'geometry'])
+    for location in build_locations['geometry']:
+        build_location_postcodes = snowflake_connector.sf_query_to_df('lolipop/edgap_demo_staging_config.cfg', 
+        f'''
+        with 
+        postcode_geog as (
+            select
+                pcds as postcode,
+                to_geometry(geometry) as geometry
+            from edgap_geo_staging.ons.dim_pcd_uk_ons_nspl_geog_2022_05
+            
+        ),
+        georeference as (
+        SELECT
+            postcode,
+            geometry
+        FROM
+            postcode_geog
+        WHERE
+            ST_Within(
+                geometry,
+                TO_GEOMETRY('{location}'))
+        ),
+        convert_to_wkt as (
+        select postcode, st_aswkt(geometry) as geometry from georeference
+        )
+        select 
+            postcode,
+            'build_location' as type,
+            geometry
+        from convert_to_wkt''')
+        
+        build_location_postcodes_all = pd.concat([build_location_postcodes_all, build_location_postcodes])
+    
+    print('Retrieving build location postcodes successful.')
+
+    # Now, we want to combine all the postcodes into one DataFrame
+    print('All steps completed. Now combining all results into one table.')
+    print('Dimensions for footprint and buffer table:',footprint_and_buffer_postcodes_all.shape)
+    print('Dimensions for roadworks table:',roadworks_postcodes_all.shape)
+    print('Dimensions for build locations table:',build_location_postcodes_all.shape)
+    all_postcodes = pd.concat([footprint_and_buffer_postcodes_all, build_location_postcodes_all, roadworks_postcodes_all])
+    all_postcodes = all_postcodes.sort_values(by=['postcode', 'type'])
+    return all_postcodes

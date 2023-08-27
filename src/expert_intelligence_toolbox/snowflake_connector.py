@@ -38,8 +38,7 @@ def sf_query_to_df(sf_cre_path: str, sf_query: str):
 
     return df
 
-import pandas as pd
-from sqlalchemy import create_engine
+
 
 def sf_table_to_df(sf_cre_path: str, sf_schema_name: str, sf_table_name: str, columns_to_select: list = None):
     """
