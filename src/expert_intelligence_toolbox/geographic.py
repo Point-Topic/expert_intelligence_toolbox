@@ -6,7 +6,7 @@ import geopandas as gpd
 import pandas as pd
 import time
 import csv
-import snowflake_connector
+from expert_intelligence_toolbox import snowflake_connector
 from shapely.wkt import loads as wkt_loads
 import geopandas as gpd
 
@@ -200,50 +200,53 @@ def convert_list_to_boundaries(country: str, locations_list: str, return_geometr
     overpass = Overpass()
 
     for location in locations_list:
-        query = f'''
-        area[name="{country}"];
-        (
-        relation["type"="boundary"]["name"="{location}"](area);
-        );
-        (._;>;);
-        out body;
-        '''
+        try:
+            query = f'''
+            area[name="{country}"];
+            (
+            relation["type"="boundary"]["name"="{location}"](area);
+            );
+            (._;>;);
+            out body;
+            '''
 
-        r = overpass.query(query)
+            r = overpass.query(query)
 
-        filtered = [i for i in r.toJSON()['elements'] if 'tags' not in i.keys()]
+            filtered = [i for i in r.toJSON()['elements'] if 'tags' not in i.keys()]
 
-        coordinates_df = pd.DataFrame(filtered)
+            coordinates_df = pd.DataFrame(filtered)
 
-        # filter out the points
-        coordinates_df = coordinates_df[coordinates_df['type'] == 'node']
+            # filter out the points
+            coordinates_df = coordinates_df[coordinates_df['type'] == 'node']
 
-        # create a hash by grouping lat and lon
-        coordinates_df["geohash"] = coordinates_df.apply(lambda r: geolib.geohash.encode(r["lon"], r["lat"], 3), axis=1)
+            # create a hash by grouping lat and lon
+            coordinates_df["geohash"] = coordinates_df.apply(lambda r: geolib.geohash.encode(r["lon"], r["lat"], 3), axis=1)
 
-        # create a geodataframe to store the points
-        gdf = gpd.GeoDataFrame(
-            coordinates_df, geometry=gpd.points_from_xy(coordinates_df["lon"], coordinates_df["lat"]), crs="epsg:4326"
-        )
-        # cluster points to polygons as a new geodataframe using convex hull
-        polygons = gdf.dissolve(by="geohash", aggfunc={"type": "first", "id":"count"})
-        polygons["geometry"] = polygons["geometry"].convex_hull
+            # create a geodataframe to store the points
+            gdf = gpd.GeoDataFrame(
+                coordinates_df, geometry=gpd.points_from_xy(coordinates_df["lon"], coordinates_df["lat"]), crs="epsg:4326"
+            )
+            # cluster points to polygons as a new geodataframe using convex hull
+            polygons = gdf.dissolve(by="geohash", aggfunc={"type": "first", "id":"count"})
+            polygons["geometry"] = polygons["geometry"].convex_hull
 
-        # add input location
-        coordinates_df['input_location'] = location
-        polygons['input_location'] = location
+            # add input location
+            coordinates_df['input_location'] = location
+            polygons['input_location'] = location
 
-        # drop Id and Type columns
-        polygons = polygons.drop(columns=["id", "type"]).reset_index()
+            # drop Id and Type columns
+            polygons = polygons.drop(columns=["id", "type"]).reset_index()
 
-        # Return a polygon by fault, or coordinates if requested
-        if return_geometry == True:
-            # concat to dataframe using concat method
-            return_polygons_df = pd.concat([return_polygons_df, polygons])
-            
-        else:
-            return_coordinates_df = pd.concat([return_coordinates_df, coordinates_df])
-        
+            # Return a polygon by fault, or coordinates if requested
+            if return_geometry == True:
+                # concat to dataframe using concat method
+                return_polygons_df = pd.concat([return_polygons_df, polygons])
+                
+            else:
+                return_coordinates_df = pd.concat([return_coordinates_df, coordinates_df])
+        except:
+            print('Error. Likely no polygons found for ' + location)
+    
     if return_geometry == True:
         return return_polygons_df
     else:
@@ -300,22 +303,22 @@ def convert_list_to_uk_geog(locations_list: str, lsoa_boundary_files_path: str, 
 
 
     for location in locations_list:
-        query = f'''
-        area[name="United Kingdom"];
-        (
-        relation["type"="boundary"]["name"="{location}"](area);
-        );
-        (._;>;);
-        out body;
-        '''
-
-        r = overpass.query(query)
-
-        filtered = [i for i in r.toJSON()['elements'] if 'tags' not in i.keys()]
-
-        coordinates_df = pd.DataFrame(filtered)
-
         try:
+            query = f'''
+            area[name="United Kingdom"];
+            (
+            relation["type"="boundary"]["name"="{location}"](area);
+            );
+            (._;>;);
+            out body;
+            '''
+
+            r = overpass.query(query)
+
+            filtered = [i for i in r.toJSON()['elements'] if 'tags' not in i.keys()]
+
+            coordinates_df = pd.DataFrame(filtered)
+
             # filter out the points
             coordinates_df = coordinates_df[coordinates_df['type'] == 'node']
 
@@ -826,6 +829,7 @@ def operator_footprint_analysis_uk(sf_cre_path: str, upc_operator_name: str, roa
     print(str(roadworks.shape[0]) + ' relevant roadworks events found. Now creating 500m buffer around each event and retrieving postcodes...')
     roadworks_postcodes_all = pd.DataFrame(columns=['postcode', 'type', 'geometry'])
     for roadwork in roadworks['works_location_coordinates']:
+        print('Retrieving postcodes for ' + str(roadworks['works_location_coordinates'].tolist().index(roadwork)+1) + ' out of ' + str(roadworks.shape[0]) + ' total iterations.')
         roadworks_postcodes = snowflake_connector.sf_query_to_df(sf_cre_path, 
         f'''
         with

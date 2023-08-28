@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "expert_intelligence_toolbox"
-version = "1.0.03"
+version = "1.0.04"
 authors = [
   { name="Arnold Kuersteiner", email="arnold.kuersteiner@expert-intelligence.com" },
   { name="Pham Minh Ky", email="ky.pham@expert-intelligence.com" },
