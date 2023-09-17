@@ -1,6 +1,7 @@
 """
-This file contains method to interact with Snowflake using Snowpark.
+This file contains methods to interact with Snowflake using SQLAlchemy.
 """
+import json
 import openai
 import pandas as pd
 import configparser
