@@ -1,11 +1,12 @@
 """
 This file contains method to interact with Snowflake using Snowpark.
 """
+import openai
+import pandas as pd
 import configparser
 from snowflake.sqlalchemy import URL
 from sqlalchemy import create_engine
 from sqlalchemy import text
-import pandas as pd
 
 def sf_query_to_df(sf_cre_path: str, sf_query: str):
     """
