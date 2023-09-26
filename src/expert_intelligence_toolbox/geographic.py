@@ -808,65 +808,87 @@ def operator_footprint_analysis_uk(sf_cre_path: str, upc_operator_name: str, roa
     # Get roadworks locations from UPC database (!!assuming they are in EPSG:27700. In the future, we want to reference a FACT table, not STG)
     
     print('Now retrieving roadworks locations from Roadworks API data...')
-    roadworks = snowflake_connector.sf_query_to_df(sf_cre_path, 
+    roadworks_postcodes_all = snowflake_connector.sf_query_to_df(sf_cre_path, 
     f'''
+    with get_roadworks as (
+        select 
+            promoter_organisation, 
+            event_reference,
+            postcode
+        from
+        ROADWORKS.REPORTS.FACT_PERMIT
+        left join ROADWORKS.REPORTS.DIM_UPC_RDW_200M using (event_reference)
+        where promoter_organisation = '{roadworks_promoter_organisation}'
+        and event_type in ('WORK_START', 'PERMIT_GRANTED')
+    ),
+    get_postcode_geom as (
     select 
-        promoter_organisation, 
-        works_location_coordinates 
-    from
-    ROADWORKS.STAGING.STG_PERMIT
-    where promoter_organisation = '{roadworks_promoter_organisation}'
-    and event_type in ('WORK_START', 'PERMIT_GRANTED')
+        postcode,
+        'roadworks' as type,
+        to_geometry(geometry) as geometry
+    from get_roadworks as t1
+    left join edgap_geo_staging.ons.dim_pcd_uk_ons_nspl_geog_2022_05 as t2 on t1.postcode = t2.pcds
+    )
+    select postcode, type, st_aswkt(geometry) as geometry from get_postcode_geom
     ''')
-
-    roadworks['works_location_coordinates'] = roadworks['works_location_coordinates'].apply(wkt_loads)
-    roadworks = gpd.GeoDataFrame(roadworks, geometry='works_location_coordinates', crs='epsg:27700')
-    roadworks = roadworks.to_crs('epsg:4326')
-    roadworks = pd.DataFrame(roadworks)
+    print(roadworks_postcodes_all['geometry'])
+    roadworks_postcodes_all['geometry'] = roadworks_postcodes_all['geometry'].apply(wkt_loads)
+    roadworks_postcodes_all = gpd.GeoDataFrame(roadworks_postcodes_all, geometry='geometry', crs='epsg:27700')
+    roadworks_postcodes_all = roadworks_postcodes_all.to_crs('epsg:4326')
+    roadworks_postcodes_all = pd.DataFrame(roadworks_postcodes_all)
     
     # Now, we want to create a 500m buffer around each roadworks location
+    # UPDATE: we can comment all this out because Pete already did this
 
-    print(str(roadworks.shape[0]) + ' relevant roadworks events found. Now creating 500m buffer around each event and retrieving postcodes...')
-    roadworks_postcodes_all = pd.DataFrame(columns=['postcode', 'type', 'geometry'])
-    for roadwork in roadworks['works_location_coordinates']:
-        print('Retrieving postcodes for ' + str(roadworks['works_location_coordinates'].tolist().index(roadwork)+1) + ' out of ' + str(roadworks.shape[0]) + ' total iterations.')
-        roadworks_postcodes = snowflake_connector.sf_query_to_df(sf_cre_path, 
-        f'''
-        with
-        postcode_geog as (
-        select
-            pcds as postcode,
-            to_geometry(geometry) as geometry
-        from edgap_geo_staging.ons.dim_pcd_uk_ons_nspl_geog_2022_05
-        ),
+    # print(str(roadworks.shape[0]) + ' relevant roadworks events found. Now creating 500m buffer around each event and retrieving postcodes...')
+    # roadworks_postcodes_all = pd.DataFrame(columns=['postcode', 'type', 'geometry'])
+    # for roadwork in roadworks['works_location_coordinates']:
+    #     print(roadwork)
+    #     print('Retrieving postcodes for ' + str(roadworks['works_location_coordinates'].tolist().index(roadwork)+1) + ' out of ' + str(roadworks.shape[0]) + ' total iterations.')
+    #     roadworks_postcodes = snowflake_connector.sf_query_to_df(sf_cre_path, 
+    #     f'''
+    #     with
+    #     roadworks_geog as (
+    #         select
+    #             'roadwork' as postcode,
+    #             to_geometry('{roadwork}') as geometry
+    #         from roadworks.reports.fact_permit
+    #     ),
 
-        roadwork_geog as (
-            select
-                'roadwork' as postcode,
-                to_geometry('{roadwork}') as geometry
-        ),
 
-        create_buffer AS (
-            SELECT 
-                p2.postcode as postcode,
-                'roadworks' as type,
-                p2.geometry AS geometry
-            FROM roadwork_geog p
-            LEFT JOIN postcode_geog p2 ON 
-                ST_Intersects(ST_Buffer(p.geometry, 0.01), p2.geometry) 
-            limit 10 -- to limit execution time, roadworks postcodes are only supposed to act as a seed anyway.
-        ),
-        format_wkt as (
-            select 
-                postcode,
-                type,
-                st_aswkt(geometry) as geometry
-            from create_buffer
-        )
-        select * from format_wkt
-        ''')
+
+    #     postcode_geog as (
+    #     select
+    #         pcds as postcode,
+    #         to_geometry(geometry) as geometry
+    #     from edgap_geo_staging.ons.dim_pcd_uk_ons_nspl_geog_2022_05
+    #     -- testing the below:
+    #     --where postcode in (select postcode from analytics_main.reports.upc_output where msoa_and_im in 
+    #     --                        (select msoa_and_im from roadworks_geog))
+    #     ),
+
+
+    #     create_buffer AS (
+    #         SELECT 
+    #             p2.postcode as postcode,
+    #             'roadworks' as type,
+    #             p2.geometry AS geometry
+    #         FROM roadworks_geog p
+    #         LEFT JOIN postcode_geog p2 ON 
+    #             ST_Intersects(ST_Buffer(p.geometry, 0.01), p2.geometry) 
+    #         limit 10 -- to limit execution time, roadworks postcodes are only supposed to act as a seed anyway.
+    #     ),
+    #     format_wkt as (
+    #         select 
+    #             postcode,
+    #             type,
+    #             st_aswkt(geometry) as geometry
+    #         from create_buffer
+    #     )
+    #     select * from format_wkt
+    #     ''')
         
-        roadworks_postcodes_all = pd.concat([roadworks_postcodes_all, roadworks_postcodes])
+    #     roadworks_postcodes_all = pd.concat([roadworks_postcodes_all, roadworks_postcodes])
     
     print('Retrieving roadworks postcodes successful.')
 
@@ -901,7 +923,7 @@ def operator_footprint_analysis_uk(sf_cre_path: str, upc_operator_name: str, roa
     # iterate through each 'geometry' in build_locations
     build_location_postcodes_all = pd.DataFrame(columns=['postcode', 'type', 'geometry'])
     for location in build_locations['geometry']:
-        build_location_postcodes = snowflake_connector.sf_query_to_df('lolipop/edgap_demo_staging_config.cfg', 
+        build_location_postcodes = snowflake_connector.sf_query_to_df(sf_cre_path, 
         f'''
         with 
         postcode_geog as (
