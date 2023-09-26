@@ -833,18 +833,24 @@ def operator_footprint_analysis_uk(sf_cre_path: str, upc_operator_name: str, roa
         roadworks_postcodes = snowflake_connector.sf_query_to_df(sf_cre_path, 
         f'''
         with
+        roadwork_geog as (
+            select
+                'roadwork' as postcode,
+                msoa,
+                to_geometry('{roadwork}') as geometry
+            from roadworks.reports.fact_permit
+            left join analytics_main.reports.upc_output 
+        ),
         postcode_geog as (
         select
             pcds as postcode,
             to_geometry(geometry) as geometry
         from edgap_geo_staging.ons.dim_pcd_uk_ons_nspl_geog_2022_05
+        -- testing the below:
+        where postcode in (select postcode from analytics_main.reports.upc_output where msoa in 
+                                (select msoa from roadworks_geog))
         ),
 
-        roadwork_geog as (
-            select
-                'roadwork' as postcode,
-                to_geometry('{roadwork}') as geometry
-        ),
 
         create_buffer AS (
             SELECT 
@@ -901,7 +907,7 @@ def operator_footprint_analysis_uk(sf_cre_path: str, upc_operator_name: str, roa
     # iterate through each 'geometry' in build_locations
     build_location_postcodes_all = pd.DataFrame(columns=['postcode', 'type', 'geometry'])
     for location in build_locations['geometry']:
-        build_location_postcodes = snowflake_connector.sf_query_to_df('lolipop/edgap_demo_staging_config.cfg', 
+        build_location_postcodes = snowflake_connector.sf_query_to_df(sf_cre_path, 
         f'''
         with 
         postcode_geog as (
