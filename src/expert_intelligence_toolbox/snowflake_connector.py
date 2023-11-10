@@ -77,10 +77,51 @@ def sf_table_to_df(sf_cre_path: str, sf_schema_name: str, sf_table_name: str, co
 
     return df
 
-def df_to_snowflake(cre_path: str, df_name, sf_schema_name: str, sf_table_name: str, if_exists: str = 'replace', metadata: bool = False):
+def sf_connector_df_to_snowflake(cre_path: str, df_name, sf_schema_name: str, sf_table_name: str):
+        """
+        Load a Pandas DataFrame into Snowflake using Snowflake Connector. 
+
+        :param cre_path: Path to Snowflake and OpenAI credentials file.
+        :param if_exists: What to do if table already exists in Snowflake.
+
+        :param metadata: If True, then the function will use OpenAI API to automatically generate metadata for this table (columns and table header).
+        :return: Table in Snowflake is updated
+        """
+
+        # Load project configuration
+        config = configparser.ConfigParser()
+        config.read(cre_path)
+
+        # Create DataFrame
+        df = df_name
+        
+        # Snowflake Config
+        conn = snow.connect(
+            account=config['Snowflake']['account'],
+            user=config['Snowflake']['user'],
+            password=config['Snowflake']['password'],
+            database=config['Snowflake']['database'],
+            warehouse=config['Snowflake']['warehouse'],
+            role=config['Snowflake']['role'],
+            schema=sf_schema_name
+        )
+
+        # All columns must be uppercase
+        df_name.columns = [x.upper() for x in df_name.columns]
+        
+        # write to table - table name must be UPPERCASE
+        write_pandas(conn, df_name, sf_table_name)
+
+        conn.close()
+
+
+def sqlalchemy_df_to_snowflake(cre_path: str, df_name, sf_schema_name: str, sf_table_name: str, if_exists: str = 'replace', metadata: bool = False):
     """
-    Load a Pandas DataFrame into Snowflake. If metadata = True, then the function will use OpenAI API to automatically generate
+    Load a Pandas DataFrame into Snowflake using SQLAlchemy. If metadata = True, then the function will use OpenAI API to automatically generate
     metadata for this table and each column in the table.
+
+    Note: This function uploads chunks of 16,000 rows at a time. This is very slow for large tables. 
+    For large tables, use the Snowflake Connector function instead.
 
     :param cre_path: Path to Snowflake and OpenAI credentials file.
     :param df_name: Name of DataFrame to load into Snowflake. Must be lowercase. 
