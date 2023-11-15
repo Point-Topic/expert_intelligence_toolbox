@@ -8,6 +8,8 @@ import configparser
 from snowflake.sqlalchemy import URL
 from sqlalchemy import create_engine
 from sqlalchemy import text
+import snowflake.connector as snow
+from snowflake.connector.pandas_tools import write_pandas
 
 def sf_query_to_df(sf_cre_path: str, sf_query: str):
     """
@@ -231,3 +233,35 @@ def sqlalchemy_df_to_snowflake(cre_path: str, df_name, sf_schema_name: str, sf_t
     engine.dispose()
     
     return 'Data uploaded to Snowflake. If metadata=True, metadata generation was successful.'
+
+
+def sf_connector_execute_query(sf_cre_path, sf_schema_name, query):
+    """Executes a query in Snowflake."""
+    # Load project configuration
+    config = configparser.ConfigParser()
+    config.read(sf_cre_path)
+
+    
+    # Snowflake Config
+    conn = snow.connect(
+        account=config['Snowflake']['account'],
+        user=config['Snowflake']['user'],
+        password=config['Snowflake']['password'],
+        database=config['Snowflake']['database'],
+        warehouse=config['Snowflake']['warehouse'],
+        role=config['Snowflake']['role'],
+        schema=sf_schema_name
+    )
+
+    # Create a cursor object to execute queries
+    cursor = conn.cursor()
+
+    # Execute the query to create union_countries table
+    cursor.execute(query)
+
+    # Commit the transaction
+    conn.commit()
+
+    # Close the cursor and connection
+    cursor.close()
+    conn.close()
