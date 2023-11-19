@@ -112,8 +112,7 @@ def sf_connector_df_to_snowflake(cre_path: str, df_name, sf_schema_name: str, sf
         df_name.columns = [x.upper() for x in df_name.columns]
         
         # write to table - table name must be UPPERCASE
-        write_pandas(conn, df_name, sf_table_name)
-
+        write_pandas(conn, df_name, sf_table_name, auto_create_table=True, overwrite=True)
         conn.close()
 
 
