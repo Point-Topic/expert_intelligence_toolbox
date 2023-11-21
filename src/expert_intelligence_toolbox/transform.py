@@ -208,7 +208,7 @@ def logistic_forecast_distributed_country_growth(input_df, country_totals_df, me
         country_total_change = float(country_total_forecasted_year - country_total_input_year)
         
         regions = input_df.loc[(input_df['reported_at'] == year_to_forecast-1) & (input_df['country_code'] == f'{country_code}')][f'{metric_percent}'].values.tolist()
-        ekg_ids = input_df.loc[(input_df['reported_at'] == year_to_forecast-1) & (input_df['country_code'] == f'{country_code}')]['ekg_id'].values.tolist()
+        nuts_ids = input_df.loc[(input_df['reported_at'] == year_to_forecast-1) & (input_df['country_code'] == f'{country_code}')]['nuts_id_2021'].values.tolist()
         I = len(regions)
         
         shift = 0.1
@@ -238,6 +238,9 @@ def logistic_forecast_distributed_country_growth(input_df, country_totals_df, me
             except ZeroDivisionError: # if all regions have 100% or 0% coverage
                 regions_year2 = regions
                 print(f'Overall growth is zero. Coverage in {year_to_forecast} is equal to {year_to_forecast-1}.')
+            except:
+                regions_year2 = regions
+                print('Proportionality constant could not be calculated.')
         elif country_total_change < 0:
                 try:
                     regions_year2 = [i + proportionality_const*(1-i+shift)*(i)*I for i in regions]
@@ -248,11 +251,14 @@ def logistic_forecast_distributed_country_growth(input_df, country_totals_df, me
                 except ZeroDivisionError: # if all regions have 100% or 0% coverage
                     regions_year2 = regions
                     print(f'Overall growth is zero. Coverage in {year_to_forecast} is equal to {year_to_forecast-1}.')
+                except:
+                    regions_year2 = regions
+                    print('Proportionality constant could not be calculated.')
         elif country_total_change == 0:
                 regions_year2 = regions
                 print(f'Overall growth is zero. Coverage in {year_to_forecast} is equal to {year_to_forecast-1}.')
 
-        output = {'ekg_id': ekg_ids, 'country_code': f'{country_code}', f'{metric_percent}': regions_year2, 'reported_at': year_to_forecast}
+        output = {'nuts_id_2021': nuts_ids, 'country_code': f'{country_code}', f'{metric_percent}': regions_year2, 'reported_at': year_to_forecast}
         output_df = pd.DataFrame(output)
         output_df[f'{metric_percent}'] = output_df[f'{metric_percent}'].apply(lambda x: round(x,4))
 
@@ -472,7 +478,7 @@ def logistic_restatement_distributed_country_growth(input_df, country_totals_df,
         country_total_change = float(country_total_restated - country_total_original)
         
         regions = input_df.loc[(input_df['reported_at'] == year_to_restate) & (input_df['country_code'] == f'{country_code}')][f'{metric_percent}'].values.tolist()
-        ekg_ids = input_df.loc[(input_df['reported_at'] == year_to_restate) & (input_df['country_code'] == f'{country_code}')]['ekg_id'].values.tolist()
+        nuts_ids = input_df.loc[(input_df['reported_at'] == year_to_restate) & (input_df['country_code'] == f'{country_code}')]['nuts_id_2021'].values.tolist()
         I = len(regions)
 
         shift = 0.1
@@ -519,7 +525,7 @@ def logistic_restatement_distributed_country_growth(input_df, country_totals_df,
                 regions_restated = regions
                 print(f'Overall growth is zero. Restated country total in {year_to_restate} is equal to original country total.')
 
-        output = {'ekg_id': ekg_ids, 'country_code': f'{country_code}', f'{metric_percent}': regions_restated, 'reported_at': year_to_restate}
+        output = {'nuts_id_2021': nuts_ids, 'country_code': f'{country_code}', f'{metric_percent}': regions_restated, 'reported_at': year_to_restate}
         output_df = pd.DataFrame(output)
         output_df[f'{metric_percent}'] = output_df[f'{metric_percent}'].apply(lambda x: round(x,4))
 
