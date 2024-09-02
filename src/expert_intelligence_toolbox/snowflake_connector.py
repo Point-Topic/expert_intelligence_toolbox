@@ -11,8 +11,10 @@ from sqlalchemy import text
 import snowflake.connector as snow
 from snowflake.connector.pandas_tools import write_pandas
 
-def sf_query_to_df(sf_cre_path: str, sf_query: str):
+def sf_query_to_df_legacy(sf_cre_path: str, sf_query: str):
     """
+    WARNING - this legacy function reads critical credentials as plaintext. Use the new version below.
+
     Load a table from Snowflake into a Pandas DataFrame.
 
     :param sf_cre_path: Path to Snowflake credentials file.
@@ -43,10 +45,43 @@ def sf_query_to_df(sf_cre_path: str, sf_query: str):
 
     return df
 
-
-
-def sf_table_to_df(sf_cre_path: str, sf_schema_name: str, sf_table_name: str, columns_to_select: list = None):
+def sf_query_to_df(account: str, user: str, password: str, sf_cre_path: str, sf_query: str):
     """
+    Load a table from Snowflake into a Pandas DataFrame.
+
+    :param account: Snowflake account identifier.
+    :param user: Snowflake user name.
+    :param password: Snowflake user password.
+    :param sf_cre_path: Path to Snowflake credentials file (for other parameters).
+    :param sf_query: SQL query to execute on Snowflake.
+    :return: Pandas DataFrame containing the data from Snowflake.
+    """
+    # Load project configuration
+    config = configparser.ConfigParser()
+    config.read(sf_cre_path)
+    
+    # Snowflake Config
+    engine = create_engine(URL(
+        account=account,
+        user=user,
+        password=password,
+        database=config['Snowflake']['database'],
+        warehouse=config['Snowflake']['warehouse'],
+        role=config['Snowflake']['role']
+    ))
+    
+    # Execute SQL query to retrieve data from Snowflake
+    df = pd.read_sql_query(sf_query, con=engine)
+    
+    # Clean up resources
+    engine.dispose()
+    
+    return df
+
+def sf_table_to_df_legacy(sf_cre_path: str, sf_schema_name: str, sf_table_name: str, columns_to_select: list = None):
+    """
+    WARNING - this legacy function reads critical credentials as plaintext. Use the new version below.
+
     Load a table from Snowflake into a Pandas DataFrame.
 
     :param sf_cre_path: Path to Snowflake credentials file.
@@ -79,8 +114,52 @@ def sf_table_to_df(sf_cre_path: str, sf_schema_name: str, sf_table_name: str, co
 
     return df
 
-def sf_connector_df_to_snowflake(cre_path: str, df_name, sf_schema_name: str, sf_table_name: str):
+def sf_table_to_df(account: str, user: str, password: str, sf_cre_path: str, sf_schema_name: str, sf_table_name: str, columns_to_select: list = None):
+    """
+    Load a table from Snowflake into a Pandas DataFrame.
+
+    :param account: Snowflake account identifier.
+    :param user: Snowflake user name.
+    :param password: Snowflake user password.
+    :param sf_cre_path: Path to Snowflake credentials file (for other parameters).
+    :param sf_schema_name: Name of the schema containing the table to load from Snowflake.
+    :param sf_table_name: Name of the table to load from Snowflake.
+    :param columns_to_select: List of columns to select from the table. If None, all columns are selected.
+    :return: Pandas DataFrame containing the data from Snowflake.
+    """
+    # Load project configuration
+    config = configparser.ConfigParser()
+    config.read(sf_cre_path)
+    
+    # Fill in your Snowflake details here
+    engine = create_engine(URL(
+        account=account,
+        user=user,
+        password=password,
+        database=config['Snowflake']['database'],
+        warehouse=config['Snowflake']['warehouse'],
+        role=config['Snowflake']['role']
+    ))
+    connection = engine.connect()
+    
+    # Read the table directly into a DataFrame
+    df = pd.read_sql_table(
+        sf_table_name, 
+        schema=sf_schema_name, 
+        columns=columns_to_select, 
+        con=engine
+    )
+    
+    # Clean up resources
+    connection.close()
+    engine.dispose()
+
+    return df
+
+def sf_connector_df_to_snowflake_legacy(cre_path: str, df_name, sf_schema_name: str, sf_table_name: str):
         """
+        WARNING - this legacy function reads critical credentials as plaintext. Use the new version below.
+
         Load a Pandas DataFrame into Snowflake using Snowflake Connector. 
 
         :param cre_path: Path to Snowflake and OpenAI credentials file.
@@ -114,6 +193,45 @@ def sf_connector_df_to_snowflake(cre_path: str, df_name, sf_schema_name: str, sf
         # write to table - table name must be UPPERCASE
         write_pandas(conn, df_name, sf_table_name, auto_create_table=True, overwrite=True)
         conn.close()
+
+
+def sf_connector_df_to_snowflake(account: str, user: str, password: str, cre_path: str, df: pd.DataFrame, sf_schema_name: str, sf_table_name: str):
+    """
+    Load a Pandas DataFrame into Snowflake using Snowflake Connector.
+
+    :param account: Snowflake account identifier.
+    :param user: Snowflake user name.
+    :param password: Snowflake user password.
+    :param cre_path: Path to Snowflake credentials file (for other parameters).
+    :param df: The Pandas DataFrame to be loaded into Snowflake.
+    :param sf_schema_name: Name of the schema in Snowflake to load the data into.
+    :param sf_table_name: Name of the table in Snowflake to load the data into.
+    :return: The table in Snowflake is updated.
+    """
+    # Load project configuration
+    config = configparser.ConfigParser()
+    config.read(cre_path)
+    
+    # Snowflake Config
+    conn = snow.connect(
+        account=account,
+        user=user,
+        password=password,
+        database=config['Snowflake']['database'],
+        warehouse=config['Snowflake']['warehouse'],
+        role=config['Snowflake']['role'],
+        schema=sf_schema_name
+    )
+    
+    # All columns must be uppercase
+    df.columns = [x.upper() for x in df.columns]
+    
+    # Write to table - table name must be UPPERCASE
+    write_pandas(conn, df, sf_table_name, auto_create_table=True, overwrite=True)
+    
+    # Clean up resources
+    conn.close()
+
 
 
 def sqlalchemy_df_to_snowflake(cre_path: str, df_name, sf_schema_name: str, sf_table_name: str, if_exists: str = 'replace', metadata: bool = False):
@@ -234,8 +352,12 @@ def sqlalchemy_df_to_snowflake(cre_path: str, df_name, sf_schema_name: str, sf_t
     return 'Data uploaded to Snowflake. If metadata=True, metadata generation was successful.'
 
 
-def sf_connector_execute_query(sf_cre_path, sf_schema_name, query):
-    """Executes a query in Snowflake."""
+def sf_connector_execute_query_legacy(sf_cre_path, sf_schema_name, query):
+    """
+    WARNING - this legacy function reads critical credentials as plaintext. Use the new version below.
+    
+    Executes a query in Snowflake.
+    """
     # Load project configuration
     config = configparser.ConfigParser()
     config.read(sf_cre_path)
@@ -264,3 +386,43 @@ def sf_connector_execute_query(sf_cre_path, sf_schema_name, query):
     # Close the cursor and connection
     cursor.close()
     conn.close()
+
+
+def sf_connector_execute_query(account: str, user: str, password: str, sf_cre_path: str, sf_schema_name: str, query: str):
+    """
+    Executes a query in Snowflake.
+
+    :param account: Snowflake account identifier.
+    :param user: Snowflake user name.
+    :param password: Snowflake user password.
+    :param sf_cre_path: Path to Snowflake credentials file (for other parameters).
+    :param sf_schema_name: Name of the schema in which to execute the query.
+    :param query: The SQL query to execute in Snowflake.
+    """
+    # Load project configuration
+    config = configparser.ConfigParser()
+    config.read(sf_cre_path)
+    
+    # Snowflake Config
+    conn = snow.connect(
+        account=account,
+        user=user,
+        password=password,
+        database=config['Snowflake']['database'],
+        warehouse=config['Snowflake']['warehouse'],
+        role=config['Snowflake']['role'],
+        schema=sf_schema_name
+    )
+    
+    # Create a cursor object to execute queries
+    cursor = conn.cursor()
+    
+    try:
+        # Execute the query
+        cursor.execute(query)
+        # Commit the transaction
+        conn.commit()
+    finally:
+        # Close the cursor and connection
+        cursor.close()
+        conn.close()
