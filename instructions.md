@@ -42,6 +42,8 @@ When prompted for credentials:\
 Username: \_\_token__ \
 PW: enter your token here (WARNING - CTRL-V WILL NOT WORK. IN VSCODE: Edit --> Paste)
 
+NOTE: if you are getting a 403 error, despite using "\_\_token__" as your username, try `twine upload --skip-existing dist/* --verbose` and for some reason this will ask you for your API key (password) as expected.
+
 
 
 ## Creating a Package (testPyPI, PyPI)
