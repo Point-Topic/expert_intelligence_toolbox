@@ -9,7 +9,7 @@ from snowflake.sqlalchemy import URL
 from sqlalchemy import create_engine
 from sqlalchemy import text
 import snowflake.connector as snow
-from snowflake.connector.pandas_tools import write_pandas
+from snowflake.connector.pandas_tools import write_pandas, pd_writer
 
 def sf_query_to_df_legacy(sf_cre_path: str, sf_query: str):
     """
@@ -144,7 +144,7 @@ def sf_table_to_df(account: str, user: str, password: str, sf_cre_path: str, sf_
     
     # Read the table directly into a DataFrame
     df = pd.read_sql_table(
-        sf_table_name, 
+        sf_table_name.lower(), 
         schema=sf_schema_name, 
         columns=columns_to_select, 
         con=engine
@@ -195,7 +195,7 @@ def sf_connector_df_to_snowflake_legacy(cre_path: str, df_name, sf_schema_name: 
         conn.close()
 
 
-def sf_connector_df_to_snowflake(account: str, user: str, password: str, cre_path: str, df: pd.DataFrame, sf_schema_name: str, sf_table_name: str):
+def sf_connector_df_to_snowflake(account: str, user: str, password: str, cre_path: str, df: pd.DataFrame, sf_schema_name: str, sf_table_name: str, auto_create_table: bool = True, overwrite: bool = True):
     """
     Load a Pandas DataFrame into Snowflake using Snowflake Connector.
 
@@ -206,6 +206,8 @@ def sf_connector_df_to_snowflake(account: str, user: str, password: str, cre_pat
     :param df: The Pandas DataFrame to be loaded into Snowflake.
     :param sf_schema_name: Name of the schema in Snowflake to load the data into.
     :param sf_table_name: Name of the table in Snowflake to load the data into.
+    :param auto_create_table: Whether to create new table when uploading
+    :param overwrite: Whether to overwrite the existing data in table (if table exists)
     :return: The table in Snowflake is updated.
     """
     # Load project configuration
@@ -227,7 +229,7 @@ def sf_connector_df_to_snowflake(account: str, user: str, password: str, cre_pat
     df.columns = [x.upper() for x in df.columns]
     
     # Write to table - table name must be UPPERCASE
-    write_pandas(conn, df, sf_table_name, auto_create_table=True, overwrite=True)
+    write_pandas(conn, df, sf_table_name.upper(), auto_create_table=auto_create_table, overwrite=overwrite)
     
     # Clean up resources
     conn.close()
@@ -394,7 +396,7 @@ def sqlalchemy_df_to_snowflake(account: str, user: str, password: str, cre_path:
     df.columns = [x.lower() for x in df.columns]
     
     # Write DataFrame to Snowflake table
-    df.to_sql(sf_table_name, schema=sf_schema_name, con=engine, index=False, if_exists=if_exists, method='multi', chunksize=16000)
+    df.to_sql(sf_table_name, schema=sf_schema_name, con=engine, index=False, if_exists=if_exists, method='multi', chunksize=16000, method=pd_writer)
     
     if metadata:
         messages = [
