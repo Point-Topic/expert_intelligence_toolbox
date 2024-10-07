@@ -396,7 +396,7 @@ def sqlalchemy_df_to_snowflake(account: str, user: str, password: str, cre_path:
     df.columns = [x.lower() for x in df.columns]
     
     # Write DataFrame to Snowflake table
-    df.to_sql(sf_table_name, schema=sf_schema_name, con=engine, index=False, if_exists=if_exists, method='multi', chunksize=16000, method=pd_writer)
+    df.to_sql(sf_table_name, schema=sf_schema_name, con=engine, index=False, if_exists=if_exists, method=pd_writer)
     
     if metadata:
         messages = [
